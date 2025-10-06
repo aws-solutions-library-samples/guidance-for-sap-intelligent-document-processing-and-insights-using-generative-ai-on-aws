@@ -1002,14 +1002,53 @@ ENDMETHOD.
     ls_header-username  = sy-uname.
     ls_header-ref_doc_no = get_value_expensetype( 'INVOICE_RECEIPT_ID' ).
 
-    CALL FUNCTION 'CONVERT_DATE_TO_INTERNAL'
-      EXPORTING
-        date_external            = get_value_expensetype( 'INVOICE_RECEIPT_DATE' )
-      IMPORTING
-        date_internal            = ls_header-doc_date
-      EXCEPTIONS
-        date_external_is_invalid = 1
-        OTHERS                   = 2.
+    DATA: lv_date_string TYPE string,
+          lv_date_internal TYPE sy-datum.
+    
+    lv_date_string = get_value_expensetype( 'INVOICE_RECEIPT_DATE' ).
+    
+    " Handle different date formats from Textract
+    IF lv_date_string IS NOT INITIAL.
+      " Try to convert various date formats
+      IF lv_date_string CO '0123456789/'.
+        " Format: MM/DD/YYYY or DD/MM/YYYY
+        REPLACE ALL OCCURRENCES OF '/' IN lv_date_string WITH ''.
+        IF strlen( lv_date_string ) = 8.
+          " Assume MMDDYYYY format, convert to YYYYMMDD
+          lv_date_internal = |{ lv_date_string+4(4) }{ lv_date_string+0(2) }{ lv_date_string+2(2) }|.
+        ENDIF.
+      ELSEIF lv_date_string CO '0123456789-'.
+        " Format: YYYY-MM-DD
+        REPLACE ALL OCCURRENCES OF '-' IN lv_date_string WITH ''.
+        IF strlen( lv_date_string ) = 8.
+          lv_date_internal = lv_date_string.
+        ENDIF.
+      ELSEIF lv_date_string CO '0123456789.'.
+        " Format: DD.MM.YYYY
+        REPLACE ALL OCCURRENCES OF '.' IN lv_date_string WITH ''.
+        IF strlen( lv_date_string ) = 8.
+          lv_date_internal = |{ lv_date_string+4(4) }{ lv_date_string+2(2) }{ lv_date_string+0(2) }|.
+        ENDIF.
+      ENDIF.
+      
+      " Validate the converted date
+      CALL FUNCTION 'DATE_CHECK_PLAUSIBILITY'
+        EXPORTING
+          date                      = lv_date_internal
+        EXCEPTIONS
+          plausibility_check_failed = 1
+          OTHERS                    = 2.
+      
+      IF sy-subrc = 0.
+        ls_header-doc_date = lv_date_internal.
+      ELSE.
+        " If conversion fails, use current date as fallback
+        ls_header-doc_date = sy-datum.
+      ENDIF.
+    ELSE.
+      " If no date found, use current date
+      ls_header-doc_date = sy-datum.
+    ENDIF.
 
     ls_header-pstng_date = sy-datum.
 
